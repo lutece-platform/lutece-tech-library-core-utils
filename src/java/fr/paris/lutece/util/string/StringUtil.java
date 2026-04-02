@@ -36,11 +36,14 @@ package fr.paris.lutece.util.string;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
+import java.util.Base64;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.text.StringEscapeUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.microprofile.config.Config;
@@ -415,6 +418,38 @@ public final class StringUtil
             // Append last character outside of the loop to avoid trailing comma
             sbfCharList.append( _aXssCharacters [iIndex] );
             _xssCharactersAsString = sbfCharList.toString( );
+        }
+    }
+
+    /**
+     * Decodes a Base64-encoded string that was encoded client-side by the bypassXssFilter mechanism
+     * of the input macro. This allows form fields to bypass the global XSS sanitizer filter
+     * without disabling it entirely.
+     *
+     * @param strBase64Value
+     *            the Base64-encoded string received from the form field
+     * @return the decoded original string, or null if the input is null
+     */
+    public static String decodeXssBypass( String strBase64Value )
+    {
+        if ( strBase64Value == null )
+        {
+            return null;
+        }
+        if ( strBase64Value.isEmpty( ) )
+        {
+            return strBase64Value;
+        }
+        try
+        {
+            byte [ ] decodedBytes = Base64.getDecoder( ).decode( StringEscapeUtils.unescapeHtml4( strBase64Value ) );
+            return new String( decodedBytes, StandardCharsets.UTF_8 );
+        }
+        catch( IllegalArgumentException e )
+        {
+            LOGGER.error( "decodeXssBypass: failed to decode Base64 value — the submitted data may have been tampered with or corrupted. Value: '{}'",
+                    strBase64Value, e );
+            return null;
         }
     }
 }
