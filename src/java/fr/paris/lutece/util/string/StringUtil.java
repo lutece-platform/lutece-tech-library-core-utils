@@ -60,9 +60,10 @@ public final class StringUtil
     private static final Logger LOGGER = LogManager.getLogger( "lutece.util.string" );
     private static final Config _config = ConfigProvider.getConfig( );
     
-    // The characters that are considered dangerous for XSS attacks
-    private static char [ ] _aXssCharacters;
-    private static String _xssCharactersAsString;
+    // The characters that are considered dangerous for XSS attacks, read once (volatile: the methods are not synchronized, the XSS filter calls
+    // them for every request parameter and a class-wide lock serialized all the requests of the JVM)
+    private static volatile char [ ] _aXssCharacters;
+    private static volatile String _xssCharactersAsString;
     /**
      * Constructor with no parameter
      */
@@ -134,9 +135,12 @@ public final class StringUtil
      *            a character String
      * @return true if the String contains illegal characters
      */
-    public static synchronized boolean containsXssCharacters( String strValue )
+    public static boolean containsXssCharacters( String strValue )
     {
-        initXssCharacters( );
+        if ( _aXssCharacters == null )
+        {
+            initXssCharacters( );
+        }
 
         return containsXssCharacters( strValue, _aXssCharacters );
     }
@@ -150,7 +154,7 @@ public final class StringUtil
      *            a Xss characters tab to check in strValue
      * @return true if the String contains illegal characters
      */
-    public static synchronized boolean containsXssCharacters( String strValue, char [ ] aXssCharacters )
+    public static boolean containsXssCharacters( String strValue, char [ ] aXssCharacters )
     {
         // Read XSS characters from properties file if not already initialized
         boolean bContains = false;
@@ -175,7 +179,7 @@ public final class StringUtil
      *            a String wich contain a list of Xss characters to check in strValue
      * @return true if the String contains illegal characters
      */
-    public static synchronized boolean containsXssCharacters( String strValue, String strXssCharacters )
+    public static boolean containsXssCharacters( String strValue, String strXssCharacters )
     {
         // Read XSS characters from properties file if not already initialized
         if ( strXssCharacters != null )
@@ -191,9 +195,12 @@ public final class StringUtil
      *
      * @return a String containing a comma-separated list of the XSS characters
      */
-    public static synchronized String getXssCharactersAsString( )
+    public static String getXssCharactersAsString( )
     {
-        initXssCharacters( );
+        if ( _xssCharactersAsString == null )
+        {
+            initXssCharacters( );
+        }
 
         return _xssCharactersAsString;
     }
@@ -205,7 +212,7 @@ public final class StringUtil
      *            The mail to check
      * @return boolean true if strEmail is valid
      */
-    public static synchronized boolean checkEmail( String strEmail )
+    public static boolean checkEmail( String strEmail )
     {
         return strEmail.matches( _config.getOptionalValue( PROPERTY_MAIL_PATTERN, String.class ).orElse( EMAIL_PATTERN ) );
     }
@@ -219,7 +226,7 @@ public final class StringUtil
      *            The list of banned domain names. Domain names may start with a '@' or not.
      * @return boolean true if strEmail is valid, false otherwise
      */
-    public static synchronized boolean checkEmailAndDomainName( String strEmail, String [ ] strBannedDomainNames )
+    public static boolean checkEmailAndDomainName( String strEmail, String [ ] strBannedDomainNames )
     {
         boolean bIsValid = strEmail.matches( _config.getOptionalValue( PROPERTY_MAIL_PATTERN, String.class ).orElse( EMAIL_PATTERN ) );
 
@@ -235,7 +242,7 @@ public final class StringUtil
      *            List of banned domain names
      * @return True if the email address is correct, false otherwise
      */
-    public static synchronized boolean checkEmailDomainName( String strEmail, String [ ] strBannedDomainNames )
+    public static boolean checkEmailDomainName( String strEmail, String [ ] strBannedDomainNames )
     {
         if ( ( strBannedDomainNames != null ) && ( strBannedDomainNames.length > 0 ) )
         {
@@ -282,7 +289,7 @@ public final class StringUtil
      *            The code Key
      * @return True if code key is valid
      */
-    public static synchronized boolean checkCodeKey( String strCodeKey )
+    public static boolean checkCodeKey( String strCodeKey )
     {
         return strCodeKey != null && strCodeKey.matches( STRING_CODE_PATTERN );
     }
@@ -390,31 +397,28 @@ public final class StringUtil
     }
     
     /**
-     * Loads the XSS config 
+     * Loads the XSS config once: only the initialization is synchronized
      */
     private static synchronized void initXssCharacters( )
     {
-        // Read XSS characters from properties file if not already initialized
-        if ( _aXssCharacters == null )
+        if ( _aXssCharacters != null && _xssCharactersAsString != null )
         {
-            _aXssCharacters = _config.getValue( PROPERTY_XSS_CHARACTERS, String.class ).toCharArray( );
+            return;
         }
-        
-        if ( _xssCharactersAsString == null )
+        char [ ] aXssCharacters = _config.getValue( PROPERTY_XSS_CHARACTERS, String.class ).toCharArray( );
+        StringBuilder sbfCharList = new StringBuilder( );
+
+        int iIndex;
+
+        for ( iIndex = 0; iIndex < ( aXssCharacters.length - 1 ); iIndex++ )
         {
-            StringBuilder sbfCharList = new StringBuilder( );
-
-            int iIndex;
-
-            for ( iIndex = 0; iIndex < ( _aXssCharacters.length - 1 ); iIndex++ )
-            {
-                sbfCharList.append( _aXssCharacters [iIndex] );
-                sbfCharList.append( ", " );
-            }
-
-            // Append last character outside of the loop to avoid trailing comma
-            sbfCharList.append( _aXssCharacters [iIndex] );
-            _xssCharactersAsString = sbfCharList.toString( );
+            sbfCharList.append( aXssCharacters [iIndex] );
+            sbfCharList.append( ", " );
         }
+
+        // Append last character outside of the loop to avoid trailing comma
+        sbfCharList.append( aXssCharacters [iIndex] );
+        _xssCharactersAsString = sbfCharList.toString( );
+        _aXssCharacters = aXssCharacters;
     }
 }

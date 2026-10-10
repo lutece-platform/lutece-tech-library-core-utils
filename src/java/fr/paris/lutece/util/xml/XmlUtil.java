@@ -58,7 +58,8 @@ public final class XmlUtil
     private static final String TAG_ENCLOSED = "\"";
     private static final Config _config = ConfigProvider.getConfig( );
     
-    private static String _strXmlHeader;
+    // Read once; volatile instead of a class-wide lock (called while building every page with portlets)
+    private static volatile String _strXmlHeader;
     
     /**
      * Instantiates a new xml util.
@@ -72,7 +73,7 @@ public final class XmlUtil
      * 
      * @return The header
      */
-    public static synchronized String getXmlHeader( )
+    public static String getXmlHeader( )
     {
         if (null == _strXmlHeader)
         {
