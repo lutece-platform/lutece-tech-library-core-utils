@@ -154,4 +154,18 @@ public class SecurityUtilTest
         assertTrue( SecurityUtil.isInternalRedirectUrlSafe( strUrl, request, strUrlPatterns ) );
 
     }
+
+    /**
+     * Test that logForgingProtect neutralizes a lone carriage return and other control characters, which could
+     * otherwise forge or rewrite a log line.
+     */
+    @Test
+    public void testLogForgingProtect( )
+    {
+        String strResult = SecurityUtil.logForgingProtect( "normal\rFORGED\u001b[31mx\u0008y" );
+        assertFalse( strResult.contains( "\r" ), "a lone CR must not pass through" );
+        assertFalse( strResult.contains( "\u001b" ), "an ANSI escape must not pass through" );
+        assertFalse( strResult.contains( "\u0008" ), "a backspace must not pass through" );
+        assertTrue( strResult.contains( "\n** FORGED" ), "a forged line must be prefixed" );
+    }
 }

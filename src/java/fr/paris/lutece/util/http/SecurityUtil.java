@@ -364,10 +364,38 @@ public final class SecurityUtil
      */
     public static String logForgingProtect( String strUserInputData )
     {
-        int nCharCount = strUserInputData.length( );
-        int nLineCount = StringUtils.countMatches( strUserInputData, "\n" );
-        String strPrefixedLines = strUserInputData.replace( "\n", "\n** " );
+        if ( strUserInputData == null )
+        {
+            return strUserInputData;
+        }
+        String strSanitized = sanitizeLogData( strUserInputData );
+        int nCharCount = strSanitized.length( );
+        int nLineCount = StringUtils.countMatches( strSanitized, "\n" );
+        String strPrefixedLines = strSanitized.replace( "\n", "\n** " );
         return "\n** USER INPUT DATA : BEGIN (" + nLineCount + " lines and " + nCharCount + " chars) ** \n" + strPrefixedLines + "\n** USER INPUT DATA : END\n";
+    }
+
+    /**
+     * Neutralizes the characters of a user input that could forge a log entry: every line break (CR, LF or CRLF) is
+     * normalized to a single LF so that each line is prefixed by the caller, and every other control character
+     * (a lone CR, a backspace, an ANSI escape, a C1 control...) is replaced by '?' so it cannot rewrite or inject a
+     * log line.
+     *
+     * @param strUserInputData
+     *            the user input to neutralize
+     * @return the neutralized user input
+     */
+    private static String sanitizeLogData( String strUserInputData )
+    {
+        String strNormalized = strUserInputData.replaceAll( "\r\n?", "\n" );
+        StringBuilder sbSanitized = new StringBuilder( strNormalized.length( ) );
+        for ( int nIndex = 0; nIndex < strNormalized.length( ); nIndex++ )
+        {
+            char cChar = strNormalized.charAt( nIndex );
+            boolean bAllowed = cChar == '\n' || cChar == '\t' || ( cChar >= 0x20 && cChar <= 0x7e ) || cChar >= 0xa0;
+            sbSanitized.append( bAllowed ? cChar : '?' );
+        }
+        return sbSanitized.toString( );
     }
 
     /**
