@@ -33,6 +33,7 @@
  */
 package fr.paris.lutece.util.http;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -167,5 +168,72 @@ public class SecurityUtilTest
         assertFalse( strResult.contains( "\u001b" ), "an ANSI escape must not pass through" );
         assertFalse( strResult.contains( "\u0008" ), "a backspace must not pass through" );
         assertTrue( strResult.contains( "\n** FORGED" ), "a forged line must be prefixed" );
+    }
+
+    private static MockHttpServletRequest requestFrom( String strRemoteAddress, String strForwardedFor )
+    {
+        MockHttpServletRequest request = new MockHttpServletRequest( )
+        {
+            @Override
+            public String getRemoteAddr( )
+            {
+                return strRemoteAddress;
+            }
+        };
+        if ( strForwardedFor != null )
+        {
+            request.addHeader( "X-Forwarded-For", strForwardedFor );
+        }
+        return request;
+    }
+
+    /**
+     * No trusted proxy configured: the header is used whatever the sender (former behaviour)
+     */
+    @Test
+    public void testGetRealIpWithoutTrustedProxies( )
+    {
+        assertEquals( "1.2.3.4", SecurityUtil.getRealIp( requestFrom( "203.0.113.9", "1.2.3.4" ) ) );
+        assertEquals( "1.2.3.4", SecurityUtil.getRealIp( requestFrom( "203.0.113.9", "1.2.3.4" ), "" ) );
+        assertEquals( "1.2.3.4", SecurityUtil.getRealIp( requestFrom( "203.0.113.9", "1.2.3.4, 10.0.0.2" ), null ) );
+        assertEquals( "203.0.113.9", SecurityUtil.getRealIp( requestFrom( "203.0.113.9", null ), null ) );
+    }
+
+    /**
+     * Request from a trusted proxy: the right-most address of the header that is not a trusted proxy
+     */
+    @Test
+    public void testGetRealIpFromTrustedProxy( )
+    {
+        String strTrusted = "10.0.0.0/8, 192.168.1.10, fd00::/8";
+
+        // the client forged "6.6.6.6", the first proxy appended the real client address
+        assertEquals( "198.51.100.7", SecurityUtil.getRealIp( requestFrom( "10.1.2.3", "6.6.6.6, 198.51.100.7, 192.168.1.10" ), strTrusted ) );
+        assertEquals( "198.51.100.7", SecurityUtil.getRealIp( requestFrom( "192.168.1.10", "198.51.100.7" ), strTrusted ) );
+        // IPv6 proxy and client
+        assertEquals( "2001:db8::1", SecurityUtil.getRealIp( requestFrom( "fd12::5", "2001:db8::1" ), strTrusted ) );
+        // no header: the proxy itself
+        assertEquals( "10.1.2.3", SecurityUtil.getRealIp( requestFrom( "10.1.2.3", null ), strTrusted ) );
+    }
+
+    /**
+     * Request from an address that is not a trusted proxy: its own address, the header is ignored
+     */
+    @Test
+    public void testGetRealIpFromUntrustedSender( )
+    {
+        String strTrusted = "10.0.0.0/8";
+
+        assertEquals( "203.0.113.9", SecurityUtil.getRealIp( requestFrom( "203.0.113.9", "1.2.3.4" ), strTrusted ) );
+        assertEquals( "11.0.0.1", SecurityUtil.getRealIp( requestFrom( "11.0.0.1", "10.0.0.5" ), strTrusted ) );
+    }
+
+    /**
+     * A header made only of trusted proxies: the left-most one
+     */
+    @Test
+    public void testGetRealIpHeaderOfTrustedProxiesOnly( )
+    {
+        assertEquals( "10.0.0.5", SecurityUtil.getRealIp( requestFrom( "10.1.2.3", "10.0.0.5, 10.0.0.6" ), "10.0.0.0/8" ) );
     }
 }

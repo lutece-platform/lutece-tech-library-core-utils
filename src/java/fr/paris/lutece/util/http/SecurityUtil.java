@@ -33,6 +33,8 @@
  */
 package fr.paris.lutece.util.http;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.regex.Pattern;
@@ -69,6 +71,14 @@ public final class SecurityUtil
     public static final String PROPERTY_REDIRECT_URL_SAFE_PATTERNS = "lutece.security.redirectUrlSafePatterns";
     public static final String PROPERTY_REDIRECT_URL_BLOCKED_SCHEMES = "lutece.security.redirectUrlBlockedSchemes";
     public static final String PROPERTY_REDIRECT_URL_BLOCKED_CHARACTERS_PATTERNS = "lutece.security.redirectUrlBlockedCharactersPatterns";
+    /**
+     * Comma-separated list of the reverse proxies whose X-Forwarded-For header is trusted (addresses or CIDR ranges, IPv4 or IPv6, e.g.
+     * <code>10.0.0.0/8, 192.168.1.10, fd00::/8</code>). Not set or empty: the header is trusted whatever the sender (former behaviour).
+     */
+    public static final String PROPERTY_TRUSTED_PROXIES = "lutece.security.trustedProxies";
+    private static final String CONSTANT_CIDR_SEPARATOR = "/";
+    private static final Pattern PATTERN_LITERAL_IPV4 = Pattern.compile( "^([0-9]{1,3}\\.){3}[0-9]{1,3}$" );
+    private static final Pattern PATTERN_LITERAL_IPV6 = Pattern.compile( "^[0-9a-fA-F:.]*:[0-9a-fA-F:.]*$" );
     private static Pattern PATTERN_URL_SAFE ;
 
     /**
@@ -235,12 +245,221 @@ public final class SecurityUtil
 
     /**
      * Get the IP of the user from a request. If the user is behind an apache server, return the ip of the user instead of the ip of the server.
+     * <p>
+     * With the property <code>lutece.security.trustedProxies</code> set, the X-Forwarded-For header is used only when the request comes from one of
+     * the listed proxies, and the user address is the right-most address of the header that is not a trusted proxy. Without it, the header is used
+     * whatever the sender of the request.
+     * </p>
      * 
      * @param request
      *            The request
      * @return The IP of the user that made the request
      */
     public static String getRealIp( HttpServletRequest request )
+    {
+        return getRealIp( request, _config.getOptionalValue( PROPERTY_TRUSTED_PROXIES, String.class ).orElse( null ) );
+    }
+
+    /**
+     * Return the IP address of the client. When trusted proxies are given, the X-Forwarded-For header is read only when the request comes from one of
+     * them, and the client address is the right-most address of the header that is not a trusted proxy.
+     *
+     * @param request
+     *            The HTTP request
+     * @param strTrustedProxies
+     *            Comma-separated trusted proxies (addresses or CIDR ranges); null or blank: the header is trusted whatever the sender
+     * @return The IP address of the client
+     */
+    static String getRealIp( HttpServletRequest request, String strTrustedProxies )
+    {
+        if ( StringUtils.isBlank( strTrustedProxies ) )
+        {
+            return getRealIpFromHeader( request );
+        }
+
+        String [ ] trustedProxies = strTrustedProxies.split( CONSTANT_COMMA );
+        String strRemoteAddress = request.getRemoteAddr( );
+
+        if ( !isTrustedProxy( strRemoteAddress, trustedProxies ) )
+        {
+            // a client that is not a trusted proxy can not choose its address with the header
+            return strRemoteAddress;
+        }
+
+        String strHeader = request.getHeader( CONSTANT_HTTP_HEADER_X_FORWARDED_FOR );
+
+        if ( StringUtils.isBlank( strHeader ) )
+        {
+            return strRemoteAddress;
+        }
+
+        // From the right: each trusted proxy appended the address it received the request from
+        String [ ] forwardedAddresses = strHeader.split( CONSTANT_COMMA );
+        String strLeftMostTrusted = null;
+
+        for ( int i = forwardedAddresses.length - 1; i >= 0; i-- )
+        {
+            String strAddress = forwardedAddresses [i].trim( );
+
+            if ( strAddress.isEmpty( ) )
+            {
+                continue;
+            }
+
+            if ( toAddressBytes( strAddress ) == null )
+            {
+                // not an address: the header can not be read further, the request comes from the trusted proxy
+                return ( strLeftMostTrusted != null ) ? strLeftMostTrusted : strRemoteAddress;
+            }
+
+            if ( !isTrustedProxy( strAddress, trustedProxies ) )
+            {
+                return strAddress;
+            }
+
+            strLeftMostTrusted = strAddress;
+        }
+
+        return ( strLeftMostTrusted != null ) ? strLeftMostTrusted : strRemoteAddress;
+    }
+
+    /**
+     * Tells if an address is one of the trusted proxies
+     *
+     * @param strAddress
+     *            the address
+     * @param trustedProxies
+     *            the trusted proxies (addresses or CIDR ranges)
+     * @return true if the address is a trusted proxy
+     */
+    private static boolean isTrustedProxy( String strAddress, String [ ] trustedProxies )
+    {
+        byte [ ] address = toAddressBytes( strAddress );
+
+        if ( address == null )
+        {
+            return false;
+        }
+
+        for ( String strTrustedProxy : trustedProxies )
+        {
+            if ( matches( address, strTrustedProxy.trim( ) ) )
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Tells if an address matches a trusted proxy (an address or a CIDR range)
+     *
+     * @param address
+     *            the bytes of the address
+     * @param strTrustedProxy
+     *            the address or the CIDR range
+     * @return true if it matches
+     */
+    private static boolean matches( byte [ ] address, String strTrustedProxy )
+    {
+        String strProxyAddress = strTrustedProxy;
+        int nPrefixLength = -1;
+        int nIndexSeparator = strTrustedProxy.indexOf( CONSTANT_CIDR_SEPARATOR );
+
+        if ( nIndexSeparator >= 0 )
+        {
+            strProxyAddress = strTrustedProxy.substring( 0, nIndexSeparator );
+
+            try
+            {
+                nPrefixLength = Integer.parseInt( strTrustedProxy.substring( nIndexSeparator + 1 ).trim( ) );
+            }
+            catch( NumberFormatException e )
+            {
+                return false;
+            }
+        }
+
+        byte [ ] proxyAddress = toAddressBytes( strProxyAddress.trim( ) );
+
+        if ( ( proxyAddress == null ) || ( proxyAddress.length != address.length ) )
+        {
+            return false;
+        }
+
+        int nBits = ( nPrefixLength < 0 ) ? address.length * 8 : nPrefixLength;
+
+        if ( nBits > address.length * 8 )
+        {
+            return false;
+        }
+
+        for ( int i = 0; i < nBits; i++ )
+        {
+            int nMask = 0x80 >> ( i % 8 );
+
+            if ( ( address [i / 8] & nMask ) != ( proxyAddress [i / 8] & nMask ) )
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Converts a literal IPv4 or IPv6 address to its bytes, without any name resolution
+     *
+     * @param strAddress
+     *            the address
+     * @return the bytes of the address (4 for IPv4 and IPv4-mapped IPv6 addresses, 16 for IPv6), or null if it is not a literal address
+     */
+    private static byte [ ] toAddressBytes( String strAddress )
+    {
+        String strLiteral = StringUtils.removeEnd( StringUtils.removeStart( strAddress, "[" ), "]" );
+        int nIndexZone = strLiteral.indexOf( '%' );
+
+        if ( nIndexZone >= 0 )
+        {
+            strLiteral = strLiteral.substring( 0, nIndexZone );
+        }
+
+        if ( PATTERN_LITERAL_IPV4.matcher( strLiteral ).matches( ) )
+        {
+            for ( String strByte : strLiteral.split( "\\." ) )
+            {
+                if ( Integer.parseInt( strByte ) > 255 )
+                {
+                    return null;
+                }
+            }
+        }
+        else
+            if ( !PATTERN_LITERAL_IPV6.matcher( strLiteral ).matches( ) )
+            {
+                return null;
+            }
+
+        try
+        {
+            // a literal address only (checked above): no DNS lookup
+            return InetAddress.getByName( strLiteral ).getAddress( );
+        }
+        catch( UnknownHostException e )
+        {
+            return null;
+        }
+    }
+
+    /**
+     * Return the IP address of the client from the X-Forwarded-For header, whatever the sender of the request (no trusted proxy configured)
+     *
+     * @param request
+     *            The HTTP request
+     * @return The IP address of the client
+     */
+    private static String getRealIpFromHeader( HttpServletRequest request )
     {
         String strIPAddress = request.getHeader( CONSTANT_HTTP_HEADER_X_FORWARDED_FOR );
 
