@@ -139,4 +139,46 @@ public class StringUtilTest
 			fail( e.getLocalizedMessage( ) );
 		}
     }
+
+    /**
+     * getIntValue returns the default value of a value that is not an integer (documented behaviour): it must not log this
+     * expected case as an error with a stack trace (« For input string: "" » at each move of an admin dashboard without column).
+     */
+    @Test
+    public void testGetIntValueOfANonIntegerLogsNoError( )
+    {
+        java.util.List<String> listErrors = new java.util.concurrent.CopyOnWriteArrayList<>( );
+        org.apache.logging.log4j.core.appender.AbstractAppender appender = new org.apache.logging.log4j.core.appender.AbstractAppender( "getIntValueCapture",
+                null, null, true, org.apache.logging.log4j.core.config.Property.EMPTY_ARRAY )
+        {
+            @Override
+            public void append( org.apache.logging.log4j.core.LogEvent event )
+            {
+                if ( event.getLevel( ).isMoreSpecificThan( org.apache.logging.log4j.Level.ERROR ) )
+                {
+                    listErrors.add( event.getMessage( ).getFormattedMessage( ) );
+                }
+            }
+        };
+        appender.start( );
+        org.apache.logging.log4j.core.LoggerContext context = (org.apache.logging.log4j.core.LoggerContext) org.apache.logging.log4j.LogManager
+                .getContext( false );
+        org.apache.logging.log4j.core.config.LoggerConfig loggerConfig = context.getConfiguration( ).getLoggerConfig( "lutece.util.string" );
+        loggerConfig.addAppender( appender, org.apache.logging.log4j.Level.ALL, null );
+        context.updateLoggers( );
+        try
+        {
+            assertEquals( 7, StringUtil.getIntValue( "", 7 ) );
+            assertEquals( 7, StringUtil.getIntValue( null, 7 ) );
+            assertEquals( 7, StringUtil.getIntValue( "abc", 7 ) );
+            assertEquals( 3, StringUtil.getIntValue( "3", 7 ) );
+            assertTrue( listErrors.isEmpty( ), "errors logged: " + listErrors );
+        }
+        finally
+        {
+            loggerConfig.removeAppender( "getIntValueCapture" );
+            context.updateLoggers( );
+            appender.stop( );
+        }
+    }
 }

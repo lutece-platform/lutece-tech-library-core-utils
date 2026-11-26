@@ -311,7 +311,8 @@ public final class StringUtil
         }
         catch( NumberFormatException nfe )
         {
-            LOGGER.error( nfe.getMessage( ), nfe );
+            // Not an integer: the documented answer is the default value, not an error
+            LOGGER.debug( "Not an integer, default value {} used: {}", nDefaultValue, nfe.getMessage( ) );
         }
 
         return nDefaultValue;
