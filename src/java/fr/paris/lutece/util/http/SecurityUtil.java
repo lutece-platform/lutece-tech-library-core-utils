@@ -57,7 +57,6 @@ public final class SecurityUtil
 {
     private static final String LOGGER_NAME = "lutece.security.http";
     private static final String CONSTANT_HTTP_HEADER_X_FORWARDED_FOR = "X-Forwarded-For";
-    private static final String PATTERN_IP_ADDRESS = "^([0-9]{1,3}\\.){3}[0-9]{1,3}$";
     private static final String CONSTANT_COMMA = ",";
     private static final String [ ] XXE_TERMS = {
             "!DOCTYPE", "!ELEMENT", "!ENTITY"
@@ -246,9 +245,9 @@ public final class SecurityUtil
     /**
      * Get the IP of the user from a request. If the user is behind an apache server, return the ip of the user instead of the ip of the server.
      * <p>
-     * With the property <code>lutece.security.trustedProxies</code> set, the X-Forwarded-For header is used only when the request comes from one of
-     * the listed proxies, and the user address is the right-most address of the header that is not a trusted proxy. Without it, the header is used
-     * whatever the sender of the request.
+     * The X-Forwarded-For header is used only when the request comes from one of the proxies listed in the property
+     * <code>lutece.security.trustedProxies</code>, and the user address is then the right-most address of the header that is not a trusted proxy.
+     * Without trusted proxies (default), the header is ignored: the user address is the address the request comes from.
      * </p>
      * 
      * @param request
@@ -267,14 +266,15 @@ public final class SecurityUtil
      * @param request
      *            The HTTP request
      * @param strTrustedProxies
-     *            Comma-separated trusted proxies (addresses or CIDR ranges); null or blank: the header is trusted whatever the sender
+     *            Comma-separated trusted proxies (addresses or CIDR ranges); null or blank: the header is ignored
      * @return The IP address of the client
      */
     static String getRealIp( HttpServletRequest request, String strTrustedProxies )
     {
         if ( StringUtils.isBlank( strTrustedProxies ) )
         {
-            return getRealIpFromHeader( request );
+            // no trusted proxy: the header can be forged by any client, it is ignored
+            return request.getRemoteAddr( );
         }
 
         String [ ] trustedProxies = strTrustedProxies.split( CONSTANT_COMMA );
@@ -450,43 +450,6 @@ public final class SecurityUtil
         {
             return null;
         }
-    }
-
-    /**
-     * Return the IP address of the client from the X-Forwarded-For header, whatever the sender of the request (no trusted proxy configured)
-     *
-     * @param request
-     *            The HTTP request
-     * @return The IP address of the client
-     */
-    private static String getRealIpFromHeader( HttpServletRequest request )
-    {
-        String strIPAddress = request.getHeader( CONSTANT_HTTP_HEADER_X_FORWARDED_FOR );
-
-        if ( strIPAddress != null )
-        {
-            while ( !strIPAddress.matches( PATTERN_IP_ADDRESS ) && strIPAddress.contains( CONSTANT_COMMA ) )
-            {
-                String strIpForwarded = strIPAddress.substring( 0, strIPAddress.indexOf( CONSTANT_COMMA ) );
-                strIPAddress = strIPAddress.substring( strIPAddress.indexOf( CONSTANT_COMMA ) ).replaceFirst( CONSTANT_COMMA, StringUtils.EMPTY ).trim( );
-
-                if ( ( strIpForwarded != null ) && strIpForwarded.matches( PATTERN_IP_ADDRESS ) )
-                {
-                    strIPAddress = strIpForwarded;
-                }
-            }
-
-            if ( !strIPAddress.matches( PATTERN_IP_ADDRESS ) )
-            {
-                strIPAddress = request.getRemoteAddr( );
-            }
-        }
-        else
-        {
-            strIPAddress = request.getRemoteAddr( );
-        }
-
-        return strIPAddress;
     }
 
     /**

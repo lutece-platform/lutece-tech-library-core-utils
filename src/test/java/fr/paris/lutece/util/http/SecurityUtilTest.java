@@ -188,14 +188,14 @@ public class SecurityUtilTest
     }
 
     /**
-     * No trusted proxy configured: the header is used whatever the sender (former behaviour)
+     * No trusted proxy configured: a forged X-Forwarded-For header is ignored, the client address is the address the request comes from
      */
     @Test
-    public void testGetRealIpWithoutTrustedProxies( )
+    public void testGetRealIpWithoutTrustedProxiesIgnoresTheHeader( )
     {
-        assertEquals( "1.2.3.4", SecurityUtil.getRealIp( requestFrom( "203.0.113.9", "1.2.3.4" ) ) );
-        assertEquals( "1.2.3.4", SecurityUtil.getRealIp( requestFrom( "203.0.113.9", "1.2.3.4" ), "" ) );
-        assertEquals( "1.2.3.4", SecurityUtil.getRealIp( requestFrom( "203.0.113.9", "1.2.3.4, 10.0.0.2" ), null ) );
+        assertEquals( "203.0.113.9", SecurityUtil.getRealIp( requestFrom( "203.0.113.9", "1.2.3.4" ) ) );
+        assertEquals( "203.0.113.9", SecurityUtil.getRealIp( requestFrom( "203.0.113.9", "1.2.3.4" ), "" ) );
+        assertEquals( "203.0.113.9", SecurityUtil.getRealIp( requestFrom( "203.0.113.9", "1.2.3.4, 10.0.0.2" ), null ) );
         assertEquals( "203.0.113.9", SecurityUtil.getRealIp( requestFrom( "203.0.113.9", null ), null ) );
     }
 
